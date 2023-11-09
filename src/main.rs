@@ -1,6 +1,5 @@
 use lazy_static::lazy_static;
 use std::env;
-use std::fmt::format;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +13,7 @@ use serenity::prelude::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::OnceCell;
-use tokio::time::{sleep as asleep, Timeout};
+use tokio::time::sleep as asleep;
 
 const UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -28,16 +27,21 @@ lazy_static! {
     };
 
     // Bot account username and password
-    static ref BOT_UNAME: String = env::var("BOT_UNAME").expect("Failed to get BOT_UNAME env variable");
-    static ref BOT_PASSWD: String = env::var("BOT_PASSWD").expect("Failed to get BOT_PASSWD env variable");
+    static ref BOT_UNAME: String = env::var("BOT_UNAME").expect("Failed to get the BOT_UNAME env variable");
+    static ref BOT_PASSWD: String = env::var("BOT_PASSWD").expect("Failed to get the BOT_PASSWD env variable");
 
-    // Discord HTTP
+    // Discord HTTP, used to send messages as the bot
     static ref DISCORD_HTTP: OnceCell<Arc<Http>> = OnceCell::new();
+
+    // Channel ID
+    static ref BRIDGE_CHANNEL_ID: u64 = env::var("BRIDGE_CHANNEL_ID").expect("Failed to get the BRIDGE_CHANNEL_ID env variable").parse().expect("Failed to parse BRIDGE_CHANNEL_ID as u64");
+
+    // Bot user ID
+    static ref BOT_USERID: u64 = env::var("BOT_USERID").expect("Failed to get the BOT_USERID env variable").parse().expect("Failed to parse BOT_USERID as u64");
 }
 
 async fn c2d_thread() {
     let mut buffer = [0u8; 2048];
-    let http = DISCORD_HTTP.get();
     loop {
         match tokio::time::timeout(Duration::from_secs(1),STBCHAT_STREAM.lock().await.read(&mut buffer)).await {
             Ok(Ok(n_bytes)) => {
@@ -65,7 +69,7 @@ async fn c2d_thread() {
                     continue;
                 }
 
-                ChannelId(1140708601372086313).say(DISCORD_HTTP.get().unwrap(), read_str).await.expect("Failed to say in channel");
+                ChannelId(BRIDGE_CHANNEL_ID.clone()).say(DISCORD_HTTP.get().unwrap(), read_str).await.expect("Failed to say in channel");
             }
             _ => {}
         }
@@ -76,13 +80,13 @@ struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        if msg.channel_id != ChannelId(1140708601372086313) {
+    async fn message(&self, _ctx: Context, msg: Message) {
+        if msg.channel_id != ChannelId(BRIDGE_CHANNEL_ID.clone()) {
             println!("Not queuing discord message - Wrong channel (not strawberry-chat channel)");
             return;
         }
 
-        if msg.author.id == UserId(1099801198103633920) {
+        if msg.author.id == UserId(BOT_USERID.clone()) {
             println!("Message is from bot");
             return;
         }
@@ -106,7 +110,7 @@ impl EventHandler for Handler {
 #[tokio::main]
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
-    let token = env::var("DISCORD_TOKEN").expect("Failed to get DISCORD_TOKEN env variable");
+    let token = env::var("DISCORD_TOKEN").expect("Failed to get the DISCORD_TOKEN env variable");
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
